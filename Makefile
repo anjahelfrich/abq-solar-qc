@@ -1,4 +1,6 @@
-.PHONY: setup test lint format
+.PHONY: setup test lint format dagster
+
+export DAGSTER_HOME := $(CURDIR)/.dagster
 
 setup:
 	uv sync
@@ -13,3 +15,6 @@ lint:
 format:
 	uv run ruff check --fix .
 	uv run ruff format .
+
+dagster:
+	uv run dagster dev -m abq_qc.definitions

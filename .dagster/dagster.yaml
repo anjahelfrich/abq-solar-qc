@@ -1,0 +1,6 @@
+# DuckDB allows one writer at a time, so Dagster runs one pipeline run at a time.
+concurrency:
+  runs:
+    max_concurrent_runs: 1
+telemetry:
+  enabled: false

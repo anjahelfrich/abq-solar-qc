@@ -7,6 +7,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "dagster>=1.13.28",
+    "duckdb>=2.0.0",
     "pandas>=3.1.0",
 ]
 
@@ -16,6 +18,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "dagster-webserver>=1.13.28",
     "pytest>=9.2.0",
     "ruff>=0.17.3",
 ]
