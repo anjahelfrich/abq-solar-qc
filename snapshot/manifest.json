@@ -1,0 +1,45 @@
+{
+  "code_version": "34b95f794997",
+  "first_day": "2026-08-01",
+  "newest_day": "2026-10-29",
+  "audit_last_event_id": 182,
+  "audit_last_hash": "0f57ee44199efabc30189660eaf9833f9c705d8ba2f89c00d9a1f66ee396992c",
+  "tables": {
+    "source_files": {
+      "rows": 90,
+      "sha256": "11b4066c60f3f8f9e5bed3af23f7731ad8dcb6fc449c7e7e79f7fa5acf9ffb17"
+    },
+    "measurements": {
+      "rows": 129600,
+      "sha256": "8365c138e726e70336123a584a77c32b9d04edcc31a9b18918afa61e6c6ba1ea"
+    },
+    "qc_rules": {
+      "rows": 5,
+      "sha256": "2dd3ab2541438c5e9f611902d73d6e8a66dfe3d42bff6a26937b03b48240a96b"
+    },
+    "qc_flags": {
+      "rows": 5820,
+      "sha256": "328d61f0f77a221a6d36cb213777e8602a8e23af190ef2d229b777abff744df0"
+    },
+    "overrides": {
+      "rows": 1,
+      "sha256": "883094d52858b0680eacbd9af35013ec40a8ba921c730fc745b8ff9f712c7bd4"
+    },
+    "qc_status": {
+      "rows": 12549,
+      "sha256": "8681abed24470153ccc1c99a8c9b1ef1b045165e02c494c204b12e9fe9a5e81d"
+    },
+    "audit_log": {
+      "rows": 182,
+      "sha256": "fe41e80e9a5e84b68e11b6c828b4e07790301509ab3aa68d2f3ce2fcbb87d4ea"
+    },
+    "daily_summary": {
+      "rows": 90,
+      "sha256": "ef1c6e67a14b2aeb6d2e299b22f73763cc6a00daf71f9bd9476ed7aed353f089"
+    },
+    "drift_trend": {
+      "rows": 90,
+      "sha256": "40f3d72dc8455c3ab5569d2cd9c5cee9db65c40db547fd7639c7b8dd24c8d9cd"
+    }
+  }
+}
