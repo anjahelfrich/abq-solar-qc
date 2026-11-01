@@ -39,24 +39,25 @@ What the parser has to handle:
 
 ## Pipeline
 
-Six Dagster assets carry each day's file from NOAA to the dashboard. Every step writes to the audit log alongside.
+Six daily Dagster assets carry each day's file from NOAA to the dashboard, and a seventh loads the manual overrides. Every step writes to the audit log alongside.
 
 ```mermaid
 flowchart TD
     noaa(["NOAA SOLRAD, Albuquerque<br/>one .dat file per UTC day"])
     raw["raw_solrad_file<br/>download, SHA-256 hash, keep file as-is"]
     irr["irradiance_1min<br/>parse to typed rows + lineage columns<br/><i>checks: station header, no duplicate minutes</i>"]
-    qc["qc_flags<br/>run the 5 QC rules, layer manual overrides<br/><i>checks: share of daytime minutes flagged</i>"]
+    qc["qc_flags<br/>run the 5 QC rules, log overrides that apply<br/><i>checks: share of daytime minutes flagged, audit chain intact</i>"]
     daily["daily_summary<br/>availability, flags per rule, closure ratio<br/><i>checks: availability at least 95%</i>"]
     drift["drift_trend (all days)<br/>7-day median closure ratio vs baseline<br/><i>checks: within 2% of baseline</i>"]
     snap["snapshot<br/>Parquet files committed to the repo"]
     dash(["Streamlit dashboard<br/>read-only views + CSV export"])
-    ovr["overrides.csv<br/>reviewed in git: who, why, when"]
+    ovr["manual_overrides (not partitioned)<br/>overrides/manual_overrides.csv, reviewed in git<br/><i>checks: valid rows (blocking)</i>"]
     audit[("audit_log<br/>rows only added, never edited")]
 
     noaa --> raw --> irr --> qc --> daily --> drift --> snap --> dash
     ovr --> qc
     raw --> audit
+    ovr --> audit
     qc --> audit
     audit --> snap
 ```
@@ -80,8 +81,9 @@ The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is
 | `measurements` | minute | ts_utc, ghi, dni, dhi, uvb, zenith_deg, std_\*, noaa_qc_\*, source_sha256, source_line, run_id, code_version | irradiance_1min |
 | `qc_rules` | rule version | rule_id, version, description, thresholds, severity | loaded from code |
 | `qc_flags` | rule failed for one variable (or `all`) at one minute | ts_utc, variable, rule_id, rule_version, severity, value, run_id | qc_flags |
-| `overrides` | manual decision | override_id, start_utc, end_utc, variable, rule_id, action, reason, author | loaded from overrides.csv |
-| `audit_log` | event | event_id, event_time, event_type, actor, details (JSON), run_id | raw_solrad_file, qc_flags |
+| `overrides` | manual decision | override_id, start_utc, end_utc, variable, rule_id, action, reason, author, source_sha256, run_id | manual_overrides |
+| `audit_log` | event | event_id, event_time, event_type, actor, details (JSON), run_id, prev_hash, event_hash | raw_solrad_file, manual_overrides, qc_flags |
+| `qc_status` (view) | sensor value with a flag or override | ts_utc, variable, auto_rules, override_ids, final_status | computed when queried |
 | `daily_summary` | UTC day | received_minutes, availability_pct, flags per rule, clear-sky closure ratio, NOAA agreement counts | daily_summary |
 | `drift_trend` | UTC day | 7-day median closure ratio, baseline, deviation_pct | drift_trend |
 
@@ -89,6 +91,7 @@ The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is
 - `qc_flags` holds only failures, which keeps it small: a minute with no rows there passed every rule. The exception is gaps: a missing minute gets a `gap` row even though it has no measurement.
 - `variable` is `ghi`, `dni` or `dhi`, or `all` when the flag is about the whole minute: a closure failure (the test can't tell which sensor is wrong; `value` holds the ratio) or a missing minute. A row whose value is NOAA's missing value gets a `gap` flag for that variable only.
 - Drift is not in `qc_flags`: it is per day and needs a 7-day window, so it lives in `drift_trend`.
+- `qc_status` is a view, so the final status always matches the current flags and overrides. A value not listed there is good. Flags on `all` count for every sensor.
 - The full column list with units goes in `docs/data_dictionary.md`.
 
 ## QC rules
@@ -121,6 +124,8 @@ Tuning after looking at Aug–Oct 2026 data (Anja, Nov 1, 2026):
 
 **Dagster asset checks** are a health summary of the pipeline, shown as pass, warn or fail per day in the Dagster UI:
 
+- the overrides CSV is valid (error, blocking): a typo stops QC instead of being silently ignored
+- the audit log's hash chain is intact (error)
 - the file header's latitude and longitude match the station, which catches format changes (error)
 - no duplicate minutes (error)
 - availability ≥ 95% (warn)
@@ -147,12 +152,30 @@ Dagster's asset graph adds lineage at the table level: which asset was built fro
 | --- | --- | --- |
 | `file_ingested` | a new file is downloaded | url, sha256, row count |
 | `file_changed` | a re-download's hash differs from the earlier download | old and new sha256. Both versions are kept and the day is reprocessed |
-| `qc_run` | QC runs for a day | rule versions used, flag counts per rule |
-| `override_applied` | a manual override matches data | override id, author, reason, minutes affected |
+| `overrides_loaded` | the overrides CSV changed since the last load | old and new sha256, override ids added, removed and changed |
+| `qc_run` | QC runs for a day | rule versions used, flag counts per rule, sha256 of the overrides file in effect |
+| `override_applied` | a manual override matches data in a QC run | override id, action, reason, minutes affected. `actor` is the override's author |
 
-- DuckDB has no triggers, so the add-only rule is enforced in code: there is one write function, it only inserts, and a test covers it. In PostgreSQL I'd remove UPDATE and DELETE permission on the table instead.
-- Manual overrides live in `overrides/manual_overrides.csv` (see the decisions at the end).
+- DuckDB has no triggers, so the add-only rule is enforced in code: there is one write function (`append_audit` in `db.py`), it only inserts, and a test covers it. In PostgreSQL I'd remove UPDATE and DELETE permission on the table instead.
+- **Hash chain:** each event stores the SHA-256 of its own content plus the previous event's hash. Editing or deleting an old row breaks the chain, and the `audit_chain_intact` check finds it. Removing the newest rows can't be detected from inside the table; the snapshot committed to git anchors the latest hash.
+- An audit event is written in the same transaction as the data change it describes, so there's never one without the other.
 - An override never deletes an automatic flag. The dashboard shows the automatic flag, the override, and the final status.
+
+**Manual overrides** live in `overrides/manual_overrides.csv`, one row per decision:
+
+| Column | Meaning |
+| --- | --- |
+| `override_id` | unique, e.g. `OVR-0001` |
+| `start_utc`, `end_utc` | UTC with a `Z`, e.g. `2026-08-01T21:35:00Z`. Both minutes are included |
+| `variable` | `ghi`, `dni`, `dhi`, or `all` (every sensor) |
+| `rule_id` | for `accept`: `limits`, `closure` or `stuck`. Empty for `flag_bad` |
+| `action` | `accept`: an automatic flag was reviewed and is a false alarm, so the final status is good. `flag_bad`: data known to be bad (e.g. maintenance), with or without an automatic flag |
+| `reason`, `author` | required |
+
+- Gaps can't be accepted: there is no value to keep.
+- A flag on `all` (closure) can only be accepted by an override on `all`.
+- To apply a changed CSV: commit it, then re-run `manual_overrides` and the affected days of `qc_flags`.
+- The repo ships one real override, `OVR-0001`: the 23 DNI `limits` flags on Aug 1, 21:35–23:17 UTC (−4.5 to −12.4 W/m² under full overcast, GHI ≈ DHI). That's the pyrheliometer's thermal offset, not a fault.
 
 ## Dashboard
 
@@ -175,7 +198,8 @@ abq-solar-qc/
   src/abq_qc/
     parse.py           SOLRAD file -> typed rows
     qc_rules.py        one pure function per rule
-    db.py              schema + add-only audit writer
+    db.py              schema, qc_status view, add-only audit writer + hash chain check
+    overrides.py       read, validate and load the overrides CSV
     assets/            Dagster assets and asset checks
     definitions.py     Dagster entry point, schedule
   dashboard/           Streamlit app
@@ -231,3 +255,10 @@ Decisions on the open questions (Anja, Nov 1, 2026):
 - **Drift baseline:** the August median, with a warning at ±2%, as a starting point.
 - **Repo name:** `abq-solar-qc`, for both the local folder and the GitHub repo.
 - **This doc:** copied into the repo as `docs/design.md`.
+
+Step 4 decisions (Anja, Nov 1, 2026):
+
+- **Override actions:** `accept` and `flag_bad`.
+- **Overrides CSV:** its own unpartitioned asset, `manual_overrides`, with a blocking validity check.
+- **Audit log:** hash chain for tamper evidence, plus the `overrides_loaded` event.
+- **Example data:** ship one real override (`OVR-0001`) from reviewing Aug 1.

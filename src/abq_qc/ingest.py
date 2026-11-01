@@ -14,7 +14,8 @@ from typing import Literal
 import duckdb
 import pandas as pd
 
-from abq_qc.parse import SolradFile, StationHeader, parse_solrad
+from abq_qc.db import append_audit
+from abq_qc.parse import HEADER_LINES, SolradFile, StationHeader, parse_solrad
 
 STATION_LATITUDE = 35.03796
 STATION_LONGITUDE = -106.62211
@@ -61,11 +62,25 @@ def store_raw_file(
     if previous == sha256:
         return StoredFile(sha256, "unchanged", previous, path)
 
-    con.execute(
-        "INSERT INTO source_files VALUES (?, ?, ?, ?, ?, ?)",
-        [sha256, file_date, url, len(content), datetime.now(UTC), run_id],
-    )
-    return StoredFile(sha256, "new" if previous is None else "changed", previous, path)
+    status = "new" if previous is None else "changed"
+    con.execute("BEGIN TRANSACTION")
+    try:
+        con.execute(
+            "INSERT INTO source_files VALUES (?, ?, ?, ?, ?, ?)",
+            [sha256, file_date, url, len(content), datetime.now(UTC), run_id],
+        )
+        details = {"file_date": file_date.isoformat(), "url": url, "sha256": sha256}
+        if status == "new":
+            details["data_rows"] = _data_rows(content)
+            append_audit(con, "file_ingested", "pipeline", details, run_id)
+        else:
+            details["previous_sha256"] = previous
+            append_audit(con, "file_changed", "pipeline", details, run_id)
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
+    return StoredFile(sha256, status, previous, path)
 
 
 def load_measurements(
@@ -136,6 +151,11 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _data_rows(content: bytes) -> int:
+    lines = content.decode("ascii", errors="replace").splitlines()[HEADER_LINES:]
+    return sum(1 for line in lines if line.strip())
 
 
 def _current_sha256(con: duckdb.DuckDBPyConnection, file_date: date) -> str | None:

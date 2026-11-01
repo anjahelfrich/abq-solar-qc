@@ -67,6 +67,21 @@ def test_changed_content_keeps_both_versions(con, tmp_path, content):
     assert [r[0] for r in source_rows(con)] == [first.sha256, second.sha256]
 
 
+def test_new_and_changed_files_are_audited(con, tmp_path, content):
+    first = store_raw_file(con, tmp_path, DAY, URL, content, "run-1")
+    store_raw_file(con, tmp_path, DAY, URL, content, "run-2")
+    second = store_raw_file(con, tmp_path, DAY, URL, content + b"\n", "run-3")
+
+    events = con.execute(
+        "SELECT event_type, details->>'sha256', details->>'previous_sha256', "
+        "(details->>'data_rows')::INT, run_id FROM audit_log ORDER BY event_id"
+    ).fetchall()
+    assert events == [
+        ("file_ingested", first.sha256, None, 1440, "run-1"),
+        ("file_changed", second.sha256, first.sha256, None, "run-3"),
+    ]
+
+
 def test_reverting_to_an_old_version_counts_as_a_change(con, tmp_path, content):
     store_raw_file(con, tmp_path, DAY, URL, content, "run-1")
     store_raw_file(con, tmp_path, DAY, URL, content + b"\n", "run-2")

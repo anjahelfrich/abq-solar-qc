@@ -1,0 +1,2 @@
+override_id,start_utc,end_utc,variable,rule_id,action,reason,author
+OVR-0001,2026-08-01T21:35:00Z,2026-08-01T23:17:00Z,dni,limits,accept,"DNI -4.5 to -12.4 W/m2 under full overcast (GHI about equal to DHI). Pyrheliometer thermal offset; true DNI is about 0. Not a sensor fault.",Anja Helfrich

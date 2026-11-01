@@ -1,5 +1,5 @@
-"""Run the QC rules for one day and store the flags. Plain functions, wrapped by
-`abq_qc.assets.qc`."""
+"""Run the QC rules for one day, store the flags, and log the run and any overrides that
+apply in the audit log. Plain functions, wrapped by `abq_qc.assets.qc`."""
 
 import json
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 import duckdb
 import pandas as pd
 
+from abq_qc.db import append_audit
 from abq_qc.qc_rules import RULES, daytime_flagged_share, run_minute_rules
 
 
@@ -20,6 +21,7 @@ class QcDay:
     flags: pd.DataFrame
     flagged_daytime_minutes: int
     daytime_minutes: int
+    overrides_applied: pd.DataFrame  # override_id, action, author, reason, minutes
 
     @property
     def daytime_flagged_share(self) -> float:
@@ -82,10 +84,55 @@ def run_qc(con: duckdb.DuckDBPyConnection, day: date, run_id: str) -> QcDay:
         con.register("new_flags", flags)
         con.execute("INSERT INTO qc_flags BY NAME SELECT * FROM new_flags")
         con.unregister("new_flags")
+        result = QcDay(flags, *daytime_flagged_share(rows, flags), _applied(con, start, end))
+        _log_run(con, day, result, run_id)
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")
         raise
+    return result
 
-    flagged, daytime = daytime_flagged_share(rows, flags)
-    return QcDay(flags, flagged, daytime)
+
+def _applied(con: duckdb.DuckDBPyConnection, start: datetime, end: datetime) -> pd.DataFrame:
+    """Overrides that touch this day, and how many minutes each one affects."""
+    return con.execute(
+        """
+        SELECT o.override_id, o.action, o.author, o.reason, count(DISTINCT s.ts_utc) AS minutes
+        FROM overrides o
+        JOIN qc_status s ON list_contains(s.override_ids, o.override_id)
+        WHERE s.ts_utc >= ? AND s.ts_utc < ?
+        GROUP BY ALL
+        ORDER BY o.override_id
+        """,
+        [start, end],
+    ).df()
+
+
+def _log_run(con: duckdb.DuckDBPyConnection, day: date, result: QcDay, run_id: str) -> None:
+    overrides_sha = con.execute("SELECT any_value(source_sha256) FROM overrides").fetchone()[0]
+    append_audit(
+        con,
+        "qc_run",
+        "pipeline",
+        {
+            "day": day.isoformat(),
+            "rule_versions": {r.rule_id: r.version for r in RULES},
+            "flag_counts": result.counts_by_rule(),
+            "overrides_sha256": overrides_sha,
+        },
+        run_id,
+    )
+    for o in result.overrides_applied.itertuples(index=False):
+        append_audit(
+            con,
+            "override_applied",
+            o.author,
+            {
+                "day": day.isoformat(),
+                "override_id": o.override_id,
+                "action": o.action,
+                "reason": o.reason,
+                "minutes": int(o.minutes),
+            },
+            run_id,
+        )
