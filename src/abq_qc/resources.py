@@ -17,6 +17,7 @@ USER_AGENT = "abq-qc/0.1 (+https://github.com/anjahelfrich/abq-solar-qc)"
 class Storage(dg.ConfigurableResource):
     data_dir: str = "data"
     overrides_csv: str = "overrides/manual_overrides.csv"
+    snapshot_dir: str = "snapshot"
 
     @property
     def raw_dir(self) -> Path:

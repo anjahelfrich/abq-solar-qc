@@ -125,7 +125,9 @@ def load_measurements(
     return LoadedDay(sha256, parsed)
 
 
-def header_matches_station(header: StationHeader, tolerance_deg: float = 1e-3) -> bool:
+def header_matches_station(header: StationHeader, tolerance_deg: float = 0.01) -> bool:
+    """NOAA writes the coordinates with 5 decimals in some files and 2 in others (from Aug 11,
+    2026: 35.04 -106.62), so allow about 1 km. Other SOLRAD stations are hundreds of km away."""
     return (
         abs(header.latitude - STATION_LATITUDE) <= tolerance_deg
         and abs(header.longitude - STATION_LONGITUDE) <= tolerance_deg

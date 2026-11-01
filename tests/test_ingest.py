@@ -154,6 +154,7 @@ def test_load_without_a_source_file_fails(con, tmp_path):
 def test_header_check(content):
     header = parse_solrad(content.decode()).header
     assert header_matches_station(header)
+    assert header_matches_station(replace(header, latitude=35.04, longitude=-106.62))
     assert not header_matches_station(replace(header, latitude=36.6))
 
 

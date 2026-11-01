@@ -119,16 +119,30 @@ def test_gap_fail():
 
 
 def test_stuck_pass():
+    # dni=100 makes the sky cloudy (DHI/GHI ~0.5), so DHI is checked
     rows = pd.concat(
         [
-            minutes(9, dhi=80.0),  # 9 minutes: one short of a run
+            minutes(9, dni=100.0, dhi=80.0),  # 9 minutes: one short of a run
             minutes(15, start=NOON.replace(hour=6), zenith_deg=110.0, ghi=0.0, dni=0.0, dhi=0.0),
         ]
     )
     # 10 equal values, but a missing minute splits them into two runs
-    split = minutes(11, start=NOON.replace(hour=20), dhi=80.0).drop(index=5)
+    split = minutes(11, start=NOON.replace(hour=20), dni=100.0, dhi=80.0).drop(index=5)
 
     assert qc_rules.stuck(pd.concat([rows, split])).empty
+
+
+def test_stuck_skips_steady_dhi_under_clear_sky():
+    # Clear sky (DHI/GHI ~0.07): diffuse light is steady, so equal values are expected
+    clear = minutes(30, dhi=58.1)
+    # Cloudy (DHI/GHI ~0.5): diffuse light should move, so the same run is flagged
+    cloudy = minutes(12, start=NOON.replace(hour=20), dni=100.0 + np.arange(12), dhi=80.0)
+
+    flags = qc_rules.stuck(pd.concat([clear, cloudy]))
+
+    assert len(flags) == 12
+    assert set(flags["variable"]) == {"dhi"}
+    assert flags["ts_utc"].min() == NOON.replace(hour=20)
 
 
 def test_stuck_fail():

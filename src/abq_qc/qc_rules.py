@@ -71,11 +71,11 @@ GAP = Rule(
 )
 STUCK = Rule(
     "stuck",
-    1,
-    "Same value for 10+ consecutive minutes while > 5 W/m2. The 1-second std dev = 0 "
-    "condition was dropped: std is reported in ~0.084 steps, so steady clear-sky DHI "
-    "often reads 0 for 10+ minutes.",
-    {"min_run_minutes": 10, "min_value": 5.0},
+    2,
+    "Same value for 10+ consecutive minutes while > 5 W/m2. DHI is not checked under clear "
+    "sky (DHI/GHI < 0.2): steady diffuse light can stay within one logger step for 45+ "
+    "minutes. v2 added that exemption.",
+    {"min_run_minutes": 10, "min_value": 5.0, "dhi_clear_sky_diffuse_fraction_max": 0.2},
     "suspect",
 )
 DRIFT = Rule(
@@ -153,6 +153,7 @@ def stuck(rows: pd.DataFrame) -> pd.DataFrame:
     t = STUCK.thresholds
     rows = rows.sort_values("ts_utc")
     next_minute = rows["ts_utc"].diff() == pd.Timedelta(minutes=1)
+    clear_sky_dhi = rows["dhi"] / rows["ghi"] < t["dhi_clear_sky_diffuse_fraction_max"]
     parts = []
     for var in VARIABLES:
         v = rows[var]
@@ -160,19 +161,25 @@ def stuck(rows: pd.DataFrame) -> pd.DataFrame:
         run_id = ((v != v.shift()) | ~next_minute).cumsum()
         run_length = v.groupby(run_id).transform("size")
         bad = (run_length >= t["min_run_minutes"]) & (v > t["min_value"])
+        if var == "dhi":
+            bad &= ~clear_sky_dhi
         parts.append(_flags(rows.loc[bad, "ts_utc"], var, STUCK, v[bad]))
     return pd.concat(parts, ignore_index=True)
 
 
-def clear_sky_closure_ratio(rows: pd.DataFrame) -> float:
-    """Drift input: median closure ratio over one day's clear-sky minutes (NaN if none)."""
+def clear_sky(rows: pd.DataFrame) -> pd.Series:
+    """Minutes that count as clear sky for the drift check: sun high, little diffuse light."""
     t = DRIFT.thresholds
-    clear = (
+    return (
         (rows["zenith_deg"] < t["zenith_max"])
         & (rows["ghi"] > t["ghi_min"])
         & (rows["dhi"] / rows["ghi"] < t["diffuse_fraction_max"])
     )
-    return float(closure_ratio(rows)[clear].median())
+
+
+def clear_sky_closure_ratio(rows: pd.DataFrame) -> float:
+    """Drift input: median closure ratio over one day's clear-sky minutes (NaN if none)."""
+    return float(closure_ratio(rows)[clear_sky(rows)].median())
 
 
 def drift(daily_ratio: pd.Series, baseline: float) -> pd.DataFrame:

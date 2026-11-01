@@ -67,7 +67,7 @@ Each box in the middle column between NOAA and the dashboard is a **Dagster asse
 - **Partitions:** one per UTC day, starting Aug 1, 2026. Re-running a day replaces only that day's rows, so a run is safe to repeat. Audit events are never removed.
 - **Backfill:** Aug 1 to Oct 31 in one go, from the Dagster UI or with `make backfill`.
 - **Schedule:** daily at 18:00 UTC, processing the day from 2 days earlier, because NOAA posts files 1–2 days late. If the file isn't there yet, the run fails with a clear message and can be re-run.
-- **Freshness check:** warns if the newest day is more than 3 days old. This catches a stalled pipeline or a NOAA outage.
+- **Freshness check:** warns if the newest day is more than 3 days old. This catches a stalled pipeline or a NOAA outage. It runs as its own job at 19:00 UTC, because a check inside the daily run would be skipped when that run fails.
 
 ## Storage and schema
 
@@ -103,7 +103,7 @@ Five rules run on GHI, DNI and DHI. Flags mark data as questionable, and nothing
 | `limits` | impossible values (wiring or logger faults) | BSRN "physically possible" limits. Upper: GHI ≤ Sa·1.5·μ0^1.2 + 100, DHI ≤ Sa·0.95·μ0^1.2 + 50, DNI ≤ Sa. Lower: −4 W/m² by day, −10 W/m² at night | bad |
 | `closure` | one sensor disagreeing with the other two | GHI ÷ (DNI·cos Z + DHI) within ±8% for zenith < 75° and ±15% for 75–93°. Only applied when the sum > 50 W/m² | suspect |
 | `gap` | missing data | an expected minute (1440 per day) with no row | missing |
-| `stuck` | a frozen sensor or logger | the same value 10+ minutes in a row while > 5 W/m² | suspect |
+| `stuck` | a frozen sensor or logger | the same value 10+ minutes in a row while > 5 W/m². DHI is skipped under clear sky (DHI/GHI < 0.2) | suspect |
 | `drift` | slow calibration change or a misaligned tracker | daily median closure ratio on clear-sky minutes (zenith < 60°, DHI/GHI < 0.2). Warns when the 7-day rolling median is more than 2% from the August baseline | warning (per day, not per minute) |
 
 Sa is the solar constant adjusted for the Earth–Sun distance: about 1361 W/m², varying ±3.4% over the year. μ0 is cos(zenith). "Daytime" means zenith < 90°.
@@ -113,6 +113,7 @@ The rules are pure functions in `src/abq_qc/qc_rules.py`. Each rule's thresholds
 Tuning after looking at Aug–Oct 2026 data (Anja, Nov 1, 2026):
 
 - **Stuck:** the "1-second std dev of 0 while > 50 W/m²" condition was dropped. The std is reported in steps of about 0.084 W/m², so steady clear-sky DHI often reads 0 for 10+ minutes (23 of 89 days). A frozen logger repeats its value, which the 10-minute condition already catches.
+- **Stuck v2 (step 5):** steady clear-sky DHI can stay within one logger step for up to 47 minutes (Sep 20: 58.1 W/m² from 17:02 to 17:48 UTC, while the sensor was clearly alive). v1 flagged 861 DHI minutes on 32 days, 808 of them under clear sky. v2 skips DHI when DHI/GHI < 0.2, leaving 53 flags on 5 days. GHI and DNI keep the full rule: they change minute to minute under clear sky. Where GHI is missing, clear sky can't be confirmed and DHI is still checked.
 - **Closure on cloudy days:** fast-moving clouds fail closure on 5–16% of daytime minutes, because the three sensors respond at slightly different speeds and see slightly different parts of the sky. The rule stays at the BSRN limits; the asset check threshold below accounts for it.
 
 **Why the closure test works:** GHI is the sum of direct sunlight on a flat surface (DNI·cos Z) and diffuse sky light (DHI). The station measures all three separately, so the sum is a built-in cross-check.
@@ -120,16 +121,16 @@ Tuning after looking at Aug–Oct 2026 data (Anja, Nov 1, 2026):
 - A ratio that creeps **above 1** means DNI or DHI is reading low, for example because the tracker is slipping off the sun.
 - A ratio **below 1** means GHI is reading low, or the diffuse sensor's shade is letting direct sun through.
 
-**Comparison with NOAA (not a rule):** for each day, we count minutes flagged by both, by us only, and by NOAA only. The counts show in the dashboard. A big difference in either direction is worth a look.
+**Comparison with NOAA (not a rule):** for each day, we count sensor values (GHI, DNI, DHI × minute) flagged by both, by us only, and by NOAA only. Only received rows count, since NOAA can't flag a minute that isn't in the file. Our side is the automatic flags, without overrides; a closure flag on `all` counts for all three sensors. The counts show in the dashboard. A big difference in either direction is worth a look.
 
 **Dagster asset checks** are a health summary of the pipeline, shown as pass, warn or fail per day in the Dagster UI:
 
 - the overrides CSV is valid (error, blocking): a typo stops QC instead of being silently ignored
 - the audit log's hash chain is intact (error)
-- the file header's latitude and longitude match the station, which catches format changes (error)
+- the file header's latitude and longitude match the station within 0.01° (about 1 km), which catches format changes (error). From Aug 11, 2026, NOAA writes the coordinates with 2 decimals instead of 5, so a tighter tolerance fails on real files
 - no duplicate minutes (error)
 - availability ≥ 95% (warn)
-- at most 10% of received daytime minutes flagged, gaps not counted (warn). With 5%, 45 of 89 days warned; with 10%, 15 days, mostly stormy monsoon days
+- at most 10% of received daytime minutes flagged, gaps not counted (warn). On Aug 1–Oct 29 (90 days, stuck v2): with 5%, 46 days warn; with 10%, 15 days, mostly stormy monsoon days
 - drift within ±2% (warn)
 - freshness: the newest day is no more than 3 days old (warn)
 
@@ -262,3 +263,18 @@ Step 4 decisions (Anja, Nov 1, 2026):
 - **Overrides CSV:** its own unpartitioned asset, `manual_overrides`, with a blocking validity check.
 - **Audit log:** hash chain for tamper evidence, plus the `overrides_loaded` event.
 - **Example data:** ship one real override (`OVR-0001`) from reviewing Aug 1.
+
+Step 5 decisions (Anja, Nov 1, 2026):
+
+- **NOAA comparison:** per sensor value, received rows only, automatic flags only.
+- **Freshness check:** its own job and schedule (19:00 UTC), so it still runs when the daily pipeline fails.
+- **Drift check:** judges the newest day that has a 7-day median. Past days outside the band are listed in the check's metadata and on the Drift page.
+- **Stuck rule v2:** skip DHI under clear sky (DHI/GHI < 0.2). See the tuning notes under QC rules.
+- **Header check tolerance:** 0.01°, after NOAA's switch to 2-decimal coordinates.
+- **Snapshot:** `snapshot/<table>.parquet`, one file per table (`qc_status` written as a table), rows sorted, plus `manifest.json` with row counts, a SHA-256 per file, the code version and the newest audit event's hash. No wall-clock time in it, so writing unchanged data gives byte-identical files.
+
+Defaults chosen while building step 5:
+
+- **Baseline:** median of the Aug 1–31, 2026 daily ratios that exist. No August data means no baseline, and the drift check fails.
+- **Jobs:** `daily_pipeline` (all assets, one partition, scheduled 18:00 UTC for the day 2 days earlier) and `freshness` (only the freshness check). Dagster starts schedules switched off; turn them on in the UI.
+- **`make backfill`:** loads the overrides once, runs each day's ingest → QC → summary, then rebuilds `drift_trend` once. Runs are recorded in the local Dagster instance, so they show in the UI. Writing the snapshot is its own step (`make snapshot`), because it changes files in the repo.

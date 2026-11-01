@@ -1,7 +1,4 @@
-"""DuckDB schema, connection, and the add-only audit log writer. All timestamps are in UTC.
-
-Tables for later steps (daily_summary, drift_trend) are added when those steps are built.
-"""
+"""DuckDB schema, connection, and the add-only audit log writer. All timestamps are in UTC."""
 
 import hashlib
 import json
@@ -103,6 +100,39 @@ CREATE TABLE IF NOT EXISTS audit_log (
     run_id        VARCHAR,
     prev_hash     VARCHAR     NOT NULL,
     event_hash    VARCHAR     NOT NULL
+);
+
+-- One row per UTC day. Rebuilt for a day whenever that day is re-run.
+-- noaa_* columns compare automatic flags with NOAA's, per sensor value (GHI/DNI/DHI x minute),
+-- on received rows only: NOAA can't flag a minute that isn't in the file.
+CREATE TABLE IF NOT EXISTS daily_summary (
+    day                     DATE        PRIMARY KEY,
+    received_minutes        INTEGER     NOT NULL,
+    availability_pct        DOUBLE      NOT NULL,
+    daytime_minutes         INTEGER     NOT NULL,
+    flagged_daytime_minutes INTEGER     NOT NULL,
+    flags_limits            INTEGER     NOT NULL,
+    flags_closure           INTEGER     NOT NULL,
+    flags_gap               INTEGER     NOT NULL,
+    flags_stuck             INTEGER     NOT NULL,
+    clear_sky_minutes       INTEGER     NOT NULL,
+    clear_sky_closure_ratio DOUBLE,
+    noaa_both               INTEGER     NOT NULL,
+    noaa_ours_only          INTEGER     NOT NULL,
+    noaa_theirs_only        INTEGER     NOT NULL,
+    run_id                  VARCHAR     NOT NULL
+);
+
+-- One row per UTC day in daily_summary. Rebuilt in full each time, because the 7-day window
+-- and the August baseline look across days.
+CREATE TABLE IF NOT EXISTS drift_trend (
+    day            DATE        PRIMARY KEY,
+    daily_ratio    DOUBLE,
+    rolling_median DOUBLE,
+    baseline       DOUBLE,
+    deviation_pct  DOUBLE,
+    warn           BOOLEAN     NOT NULL,
+    run_id         VARCHAR     NOT NULL
 );
 
 -- Final status per sensor value that has an automatic flag or an override. A value not listed

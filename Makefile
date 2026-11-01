@@ -1,6 +1,9 @@
-.PHONY: setup test lint format dagster
+.PHONY: setup test lint format dagster backfill snapshot
 
 export DAGSTER_HOME := $(CURDIR)/.dagster
+
+START ?= 2026-08-01
+END ?= 2026-10-31
 
 setup:
 	uv sync
@@ -18,3 +21,10 @@ format:
 
 dagster:
 	uv run dagster dev -m abq_qc.definitions
+
+# Stop `make dagster` first: DuckDB allows only one process to write at a time.
+backfill:
+	uv run python -m abq_qc.backfill $(START) $(END)
+
+snapshot:
+	uv run dagster asset materialize -m abq_qc.definitions --select snapshot
