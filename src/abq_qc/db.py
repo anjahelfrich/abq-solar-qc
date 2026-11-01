@@ -1,6 +1,6 @@
 """DuckDB schema and connection. All timestamps are stored in UTC.
 
-Tables for later steps (qc_flags, audit_log, ...) are added when those steps are built.
+Tables for later steps (overrides, audit_log, ...) are added when those steps are built.
 """
 
 from pathlib import Path
@@ -41,6 +41,31 @@ CREATE TABLE IF NOT EXISTS measurements (
     source_line   INTEGER     NOT NULL,
     run_id        VARCHAR     NOT NULL,
     code_version  VARCHAR     NOT NULL
+);
+
+-- One row per rule version, synced from abq_qc.qc_rules. Rows are added, never changed:
+-- old flags keep pointing at the exact thresholds that produced them.
+CREATE TABLE IF NOT EXISTS qc_rules (
+    rule_id       VARCHAR     NOT NULL,
+    version       INTEGER     NOT NULL,
+    description   VARCHAR     NOT NULL,
+    thresholds    JSON        NOT NULL,
+    severity      VARCHAR     NOT NULL,
+    registered_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (rule_id, version)
+);
+
+-- One row per failed rule, per variable ('ghi', 'dni', 'dhi', or 'all'), per minute.
+-- A minute with no rows here passed every rule.
+CREATE TABLE IF NOT EXISTS qc_flags (
+    ts_utc        TIMESTAMPTZ NOT NULL,
+    variable      VARCHAR     NOT NULL,
+    rule_id       VARCHAR     NOT NULL,
+    rule_version  INTEGER     NOT NULL,
+    severity      VARCHAR     NOT NULL,
+    value         DOUBLE,
+    run_id        VARCHAR     NOT NULL,
+    FOREIGN KEY (rule_id, rule_version) REFERENCES qc_rules (rule_id, version)
 );
 """
 

@@ -79,7 +79,7 @@ The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is
 | `source_files` | downloaded file version | sha256, file_date, url, size_bytes, downloaded_at, run_id | raw_solrad_file |
 | `measurements` | minute | ts_utc, ghi, dni, dhi, uvb, zenith_deg, std_\*, noaa_qc_\*, source_sha256, source_line, run_id, code_version | irradiance_1min |
 | `qc_rules` | rule version | rule_id, version, description, thresholds, severity | loaded from code |
-| `qc_flags` | rule failed for one variable at one minute | ts_utc, variable, rule_id, rule_version, severity, value, run_id | qc_flags |
+| `qc_flags` | rule failed for one variable (or `all`) at one minute | ts_utc, variable, rule_id, rule_version, severity, value, run_id | qc_flags |
 | `overrides` | manual decision | override_id, start_utc, end_utc, variable, rule_id, action, reason, author | loaded from overrides.csv |
 | `audit_log` | event | event_id, event_time, event_type, actor, details (JSON), run_id | raw_solrad_file, qc_flags |
 | `daily_summary` | UTC day | received_minutes, availability_pct, flags per rule, clear-sky closure ratio, NOAA agreement counts | daily_summary |
@@ -87,6 +87,8 @@ The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is
 
 - `measurements` is wide (one column per measurement) because the closure test compares GHI, DNI and DHI from the same minute.
 - `qc_flags` holds only failures, which keeps it small: a minute with no rows there passed every rule. The exception is gaps: a missing minute gets a `gap` row even though it has no measurement.
+- `variable` is `ghi`, `dni` or `dhi`, or `all` when the flag is about the whole minute: a closure failure (the test can't tell which sensor is wrong; `value` holds the ratio) or a missing minute. A row whose value is NOAA's missing value gets a `gap` flag for that variable only.
+- Drift is not in `qc_flags`: it is per day and needs a 7-day window, so it lives in `drift_trend`.
 - The full column list with units goes in `docs/data_dictionary.md`.
 
 ## QC rules
@@ -98,10 +100,17 @@ Five rules run on GHI, DNI and DHI. Flags mark data as questionable, and nothing
 | `limits` | impossible values (wiring or logger faults) | BSRN "physically possible" limits. Upper: GHI ≤ Sa·1.5·μ0^1.2 + 100, DHI ≤ Sa·0.95·μ0^1.2 + 50, DNI ≤ Sa. Lower: −4 W/m² by day, −10 W/m² at night | bad |
 | `closure` | one sensor disagreeing with the other two | GHI ÷ (DNI·cos Z + DHI) within ±8% for zenith < 75° and ±15% for 75–93°. Only applied when the sum > 50 W/m² | suspect |
 | `gap` | missing data | an expected minute (1440 per day) with no row | missing |
-| `stuck` | a frozen sensor or logger | the same value 10+ minutes in a row while > 5 W/m², or a 1-second std dev of 0 while > 50 W/m² | suspect |
+| `stuck` | a frozen sensor or logger | the same value 10+ minutes in a row while > 5 W/m² | suspect |
 | `drift` | slow calibration change or a misaligned tracker | daily median closure ratio on clear-sky minutes (zenith < 60°, DHI/GHI < 0.2). Warns when the 7-day rolling median is more than 2% from the August baseline | warning (per day, not per minute) |
 
-Sa is the solar constant adjusted for the Earth–Sun distance: about 1361 W/m², varying ±3.4% over the year. μ0 is cos(zenith).
+Sa is the solar constant adjusted for the Earth–Sun distance: about 1361 W/m², varying ±3.4% over the year. μ0 is cos(zenith). "Daytime" means zenith < 90°.
+
+The rules are pure functions in `src/abq_qc/qc_rules.py`. Each rule's thresholds sit next to its version number, and the pipeline refuses to run if a rule changed but kept its version, so a flag's `(rule_id, rule_version)` always points to one fixed set of thresholds.
+
+Tuning after looking at Aug–Oct 2026 data (Anja, Nov 1, 2026):
+
+- **Stuck:** the "1-second std dev of 0 while > 50 W/m²" condition was dropped. The std is reported in steps of about 0.084 W/m², so steady clear-sky DHI often reads 0 for 10+ minutes (23 of 89 days). A frozen logger repeats its value, which the 10-minute condition already catches.
+- **Closure on cloudy days:** fast-moving clouds fail closure on 5–16% of daytime minutes, because the three sensors respond at slightly different speeds and see slightly different parts of the sky. The rule stays at the BSRN limits; the asset check threshold below accounts for it.
 
 **Why the closure test works:** GHI is the sum of direct sunlight on a flat surface (DNI·cos Z) and diffuse sky light (DHI). The station measures all three separately, so the sum is a built-in cross-check.
 
@@ -115,7 +124,7 @@ Sa is the solar constant adjusted for the Earth–Sun distance: about 1361 W/m²
 - the file header's latitude and longitude match the station, which catches format changes (error)
 - no duplicate minutes (error)
 - availability ≥ 95% (warn)
-- under 5% of daytime minutes flagged (warn)
+- at most 10% of received daytime minutes flagged, gaps not counted (warn). With 5%, 45 of 89 days warned; with 10%, 15 days, mostly stormy monsoon days
 - drift within ±2% (warn)
 - freshness: the newest day is no more than 3 days old (warn)
 

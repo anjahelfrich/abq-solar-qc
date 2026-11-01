@@ -5,10 +5,11 @@ import os
 import dagster as dg
 
 from abq_qc.assets.ingest import irradiance_1min, raw_solrad_file
+from abq_qc.assets.qc import qc_flags
 from abq_qc.resources import SolradSource, Storage
 
 defs = dg.Definitions(
-    assets=[raw_solrad_file, irradiance_1min],
+    assets=[raw_solrad_file, irradiance_1min, qc_flags],
     resources={
         "noaa": SolradSource(),
         "storage": Storage(data_dir=os.environ.get("ABQ_QC_DATA_DIR", "data")),
