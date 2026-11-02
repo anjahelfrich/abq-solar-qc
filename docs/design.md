@@ -306,4 +306,4 @@ Defaults chosen while building step 7:
 
 - **pytz is a direct dependency.** DuckDB needs it to return time-zone-aware timestamps. Locally it came in through Dagster, so the tests passed; installing only the hosted packages in a clean environment showed Explore and Audit crashing without it.
 - **"Not included and why" has one source:** the README. The QC rules page renders that section of `README.md`, so the two can't disagree.
-- **Screenshot:** `docs/images/overview.png`, 2× resolution, taken with headless Chromium after the charts finished rendering.
+- **Screenshot:** `docs/images/explore_aug17.png` (Explore page, Aug 17: the day with the most missing values, so the QC flags are visible), 2× resolution, taken with headless Chromium after the charts finished rendering.

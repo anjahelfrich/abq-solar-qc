@@ -4,7 +4,7 @@ A data pipeline that checks the quality of 1-minute solar irradiance data from N
 
 **Live dashboard:** _link added after deploy_
 
-![Dashboard overview: values available per day, Aug 1 – Oct 29, 2026](docs/images/overview.png)
+![Dashboard Explore page for Aug 17, 2026, the day with the most missing values: 1-minute GHI, DNI and DHI with QC flags marked](docs/images/explore_aug17.png)
 
 ## What it does
 
