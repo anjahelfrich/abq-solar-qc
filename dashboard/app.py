@@ -1,7 +1,13 @@
 """ABQ Solar QC dashboard. Run with `make app`. Reads the committed Parquet snapshot only."""
 
-import state
-import streamlit as st
+import sys
+from pathlib import Path
+
+# Streamlit Cloud installs only dashboard/requirements.txt, not the abq_qc package itself.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+import state  # noqa: E402
+import streamlit as st  # noqa: E402
 
 st.set_page_config(page_title="ABQ Solar QC", page_icon=":material/wb_sunny:", layout="wide")
 

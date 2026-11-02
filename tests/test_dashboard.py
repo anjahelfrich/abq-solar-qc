@@ -1,5 +1,7 @@
 import json
 import math
+import re
+import tomllib
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -151,6 +153,15 @@ def test_audit_page_reports_committed_snapshot_verified():
     assert at.success and at.success[0].value.startswith("Verified")
 
 
+def test_rules_page_shows_not_included_table_from_readme():
+    at = AppTest.from_file(str(ROOT / "dashboard" / "app.py"), default_timeout=60)
+    at.run()
+    at.switch_page("views/rules.py").run()
+    shown = "\n".join(m.value for m in at.markdown)
+    assert "| Calibration records |" in shown
+    assert "## How I used AI" not in shown
+
+
 def _copy(snap: Path, tmp_path: Path) -> Path:
     out = tmp_path / "snapshot"
     out.mkdir()
@@ -164,3 +175,14 @@ def _rewrite(path: Path, sql: str) -> None:
     c.execute(f"CREATE TABLE t AS SELECT * FROM read_parquet('{path}')")
     c.execute(sql)
     c.execute(f"COPY t TO '{path}' (FORMAT parquet)")
+
+
+def test_hosted_requirements_match_uv_lock():
+    locked = {
+        p["name"]: p["version"] for p in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
+    }
+    lines = (ROOT / "dashboard" / "requirements.txt").read_text().splitlines()
+    pins = dict(line.split("==") for line in lines if line and not line.startswith("#"))
+    assert pins == {name: locked[name] for name in pins}
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["dependencies"]
+    assert set(pins) == {re.split(r"[<>=]", dep)[0] for dep in project} - {"dagster"}

@@ -1,5 +1,6 @@
+from pathlib import Path
+
 import charts
-import pandas as pd
 import queries as q
 import state
 import streamlit as st
@@ -45,27 +46,6 @@ st.caption(
 )
 
 st.subheader("Not included and why")
-NOT_INCLUDED = [
-    (
-        "Calibration records",
-        "Not publicly available for this station, and we're not using "
-        "dummy data. Drift is tracked from the measurements instead",
-    ),
-    ("Backup-sensor comparison", "The station has one sensor per measurement"),
-    ("Temperature and wind QC", "The station doesn't measure them"),
-    (
-        "pvlib clear-sky model",
-        "Time. A simple clear-sky filter (low diffuse fraction) is enough for the drift check",
-    ),
-    ("UVB QC", "Not central to solar resource data. Stored but not checked"),
-    (
-        "PostgreSQL / TimescaleDB",
-        "DuckDB keeps hosting free and simple. See docs/database_choice.md",
-    ),
-    (
-        "Scheduled runs in the hosted demo",
-        "Streamlit Cloud only hosts the app. The schedule runs locally",
-    ),
-    ("Editing flags in the dashboard, user logins", "Overrides go through git instead"),
-]
-st.table(pd.DataFrame(NOT_INCLUDED, columns=["Left out", "Why"]).set_index("Left out"))
+# Rendered from the README so the two never disagree.
+readme = (Path(__file__).resolve().parents[2] / "README.md").read_text()
+st.markdown(readme.split("## Not included and why\n", 1)[1].split("\n## ", 1)[0])

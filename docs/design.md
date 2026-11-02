@@ -73,7 +73,7 @@ Each box in the middle column between NOAA and the dashboard is a **Dagster asse
 
 The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is committed for the hosted dashboard. All times are stored in UTC.
 
-**Why DuckDB:** it is a single file with no server, and it is fast at this size. Streamlit Cloud can read the Parquet copy without a hosted database. In production, with years of data from many stations and several users and services writing at once, I'd use PostgreSQL with time partitioning, or TimescaleDB. `docs/database_choice.md` will explain this choice.
+**Why DuckDB:** it is a single file with no server, and it is fast at this size. Streamlit Cloud can read the Parquet copy without a hosted database. In production, with years of data from many stations and several users and services writing at once, I'd use PostgreSQL with time partitioning, or TimescaleDB. `docs/database_choice.md` explains this choice.
 
 | Table | One row per | Main columns | Written by |
 | --- | --- | --- | --- |
@@ -92,7 +92,7 @@ The pipeline writes all tables to one DuckDB file, and a Parquet copy of them is
 - `variable` is `ghi`, `dni` or `dhi`, or `all` when the flag is about the whole minute: a closure failure (the test can't tell which sensor is wrong; `value` holds the ratio) or a missing minute. A row whose value is NOAA's missing value gets a `gap` flag for that variable only.
 - Drift is not in `qc_flags`: it is per day and needs a 7-day window, so it lives in `drift_trend`.
 - `qc_status` is a view, so the final status always matches the current flags and overrides. A value not listed there is good. Flags on `all` count for every sensor.
-- The full column list with units goes in `docs/data_dictionary.md`.
+- The full column list with units is in `docs/data_dictionary.md`.
 
 ## QC rules
 
@@ -219,11 +219,11 @@ abq-solar-qc/
   - one end-to-end run of a single day
 - **CI:** GitHub Actions runs ruff and pytest on every push.
 - **Make targets:** `make setup`, `make dagster` (opens the Dagster UI), `make backfill`, `make snapshot`, `make app`, `make test`.
-- **Hosting:** Streamlit Community Cloud, deployed from the public GitHub repo. The daily schedule runs locally, and the hosted app shows the last committed snapshot.
+- **Hosting:** Streamlit Community Cloud, deployed from the public GitHub repo. The daily schedule runs locally, and the hosted app shows the last committed snapshot. Streamlit Cloud installs `dashboard/requirements.txt` (no Dagster), not the root `uv.lock`.
 
 ## Not included and why
 
-This list also goes in the README, so reviewers see what was left out on purpose.
+This list also goes in the README, so reviewers see what was left out on purpose. The README is the source: the dashboard's QC rules page renders its section from there.
 
 | Left out | Why |
 | --- | --- |
@@ -235,7 +235,7 @@ This list also goes in the README, so reviewers see what was left out on purpose
 | PostgreSQL / TimescaleDB | DuckDB keeps hosting free and simple. The production choice is explained in `docs/database_choice.md` |
 | Scheduled runs in the hosted demo | Streamlit Cloud only hosts the app. The schedule runs locally |
 | Editing flags in the dashboard, user logins | Overrides go through git instead |
-| Docker | Only if time is left over |
+| Docker | Time. `uv sync` already installs the exact versions in `uv.lock` |
 
 ## Build order and decisions
 
@@ -294,3 +294,16 @@ Defaults chosen while building step 6:
 - **CSV export:** one row per minute, local time first, then `ts_utc` (ISO, `Z`), values, then per sensor the final status, the automatic rules that fired and the overrides that apply, NOAA flags, and lineage (source hash, line, URL, run, code version).
 - **Colors:** GHI, DNI and DHI use categorical slots 1–3 (checked for color-blind separation). QC results use reserved status colors with their own marker shape and legend label: suspect (amber triangle), bad (red ×), flag accepted by an override (green open circle). Light theme pinned in `.streamlit/config.toml`.
 - **Tests:** `tests/test_dashboard.py` builds a 2-day snapshot from the fixtures (Aug 1 with `OVR-0001`, the Mar 4 partial day) for the queries and tamper tests, and loads every page with Streamlit's `AppTest` on the committed snapshot.
+
+Step 7 decisions (Anja, Nov 1, 2026):
+
+- **Hosted packages:** `dashboard/requirements.txt` lists only what the dashboard needs (no Dagster), with versions pinned to `uv.lock`. Streamlit Cloud reads it before the root `uv.lock`, because it looks in the entry point's folder first. `app.py` puts `src/` on the import path, since the `abq_qc` package itself isn't installed there. A test checks that the pins match `uv.lock` and that every project dependency except Dagster is listed.
+- **README "How I used AI":** drafted by Claude from what actually happened, edited by Anja.
+- **Data dictionary:** hand-written (`docs/data_dictionary.md`). A test fails if a table's columns, or the overrides CSV header, don't match the doc.
+- **README extras:** one screenshot of the Overview page. No pipeline diagram, no Docker.
+
+Defaults chosen while building step 7:
+
+- **pytz is a direct dependency.** DuckDB needs it to return time-zone-aware timestamps. Locally it came in through Dagster, so the tests passed; installing only the hosted packages in a clean environment showed Explore and Audit crashing without it.
+- **"Not included and why" has one source:** the README. The QC rules page renders that section of `README.md`, so the two can't disagree.
+- **Screenshot:** `docs/images/overview.png`, 2× resolution, taken with headless Chromium after the charts finished rendering.

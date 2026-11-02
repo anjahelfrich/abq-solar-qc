@@ -1,0 +1,8 @@
+# Streamlit Community Cloud installs this file, not the root uv.lock, so the hosted app skips
+# Dagster. DuckDB needs pytz to return time-zone-aware timestamps. Versions match uv.lock
+# (tests/test_dashboard.py checks it).
+duckdb==2.0.0
+pandas==3.1.0
+plotly==7.1.0
+pytz==2026.6
+streamlit==1.66.1
