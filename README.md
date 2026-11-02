@@ -117,15 +117,15 @@ tests/             pytest, including two real NOAA files as fixtures
 
 I built this with [Claude Code](https://claude.com/claude-code) as a pair programmer, over one weekend.
 
-- **The split:** I chose the concept, the station, the tools and the scope, and approved the design doc (`docs/design.md`) before any code was written. Claude wrote the code, tests and docs to that spec in 7 steps. After each step I reviewed it, asked for explanations until I could explain it myself, and made the open calls before it was committed.
-- **Where it helped most:** getting up to speed on the solar domain (BSRN QC practice, what the closure test means physically) and on Dagster and Streamlit, which I hadn't used before. My background is time-series PostgreSQL, sensor ingestion and Databricks.
-- **Where my judgment mattered:**
-  - **No dummy data.** Calibration records aren't public, so I left them out and said so above, rather than inventing a table that would look like real lab records.
-  - **Tuning on real data.** The first version of the stuck rule flagged 861 DHI minutes. Looking at examples showed steady clear-sky diffuse light, not a frozen sensor, so I chose to skip DHI under clear sky (53 flags left). And from Aug 11, NOAA started writing the station's coordinates with 2 decimals instead of 5, which failed the header check; I approved widening its tolerance to 0.01° (about 1 km).
-  - **What availability means.** NOAA sends every row, but some rows hold missing values. I decided the dashboard counts values, not rows, so those gaps show up.
-  - **Audit design:** a hash chain on the audit log, and overrides reviewed through git rather than edited in the app.
-- **How I checked the work:** each QC rule has tests with a case that should pass and one that should fail; two real NOAA files are test fixtures; CI runs lint and tests on every push. I also looked at the results on the full Aug–Oct backfill. That's how the stuck-rule and header-format problems surfaced, which the tests alone wouldn't have caught.
-- **One thing that would have broken:** the hosted dashboard installs fewer packages than the pipeline. Before deploying, Claude installed only the hosted ones in a clean environment and found that two pages crashed, because a library DuckDB needs had only been arriving as part of Dagster. Now it's listed explicitly, and a test checks the two dependency lists match.
+I chose the concept, the station, the tools and the scope, and approved the design doc (`docs/design.md`) before any code was written. Claude wrote the code, tests and docs to that spec in 7 steps. After each step I reviewed it, asked for explanations until I could explain it myself, and redirected as necessary before committing.
+
+Building this data pipeline and QC dashboard with AI helped me get up to speed on the solar domain, as well as gave me some light familiarity with Dagster and Streamlit, which I hadn't used before. My background is time-series PostgreSQL, sensor ingestion and Databricks.
+
+**Where my judgment mattered:**
+  - **No dummy data.** Calibration records aren't public, so I left them out.
+  - **Tuning on real data.** I turned off the stuck-value check for DHI under clear sky, because steady diffuse light was being falsely flagged as a frozen sensor. I widened coordinate tolerance because NOAA started writing the station's coordinates with 2 decimals instead of 5, which failed the header check.
+  - **What availability means.** NOAA sometimes sends rows with missing values and I decided the dashboard should count values, not rows, so those gaps show up.
+  - **Audit design:** I chose a hash chain so edits or deletions in the audit log are detectable, and kept manual overrides in a CSV so they're reviewed through git.
 
 ## Data source
 
