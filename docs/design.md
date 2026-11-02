@@ -203,7 +203,7 @@ abq-solar-qc/
     overrides.py       read, validate and load the overrides CSV
     assets/            Dagster assets and asset checks
     definitions.py     Dagster entry point, schedule
-  dashboard/           Streamlit app
+  dashboard/           Streamlit app: app.py, views/ (pages), queries.py, charts.py
   overrides/manual_overrides.csv
   snapshot/            Parquet files (committed)
   data/                raw files + DuckDB (gitignored)
@@ -278,3 +278,19 @@ Defaults chosen while building step 5:
 - **Baseline:** median of the Aug 1–31, 2026 daily ratios that exist. No August data means no baseline, and the drift check fails.
 - **Jobs:** `daily_pipeline` (all assets, one partition, scheduled 18:00 UTC for the day 2 days earlier) and `freshness` (only the freshness check). Dagster starts schedules switched off; turn them on in the UI.
 - **`make backfill`:** loads the overrides once, runs each day's ingest → QC → summary, then rebuilds `drift_trend` once. Runs are recorded in the local Dagster instance, so they show in the UI. Writing the snapshot is its own step (`make snapshot`), because it changes files in the repo.
+
+Step 6 decisions (Anja, Nov 1, 2026):
+
+- **Data access:** an in-memory DuckDB with one view per Parquet file; pages query it with SQL.
+- **Explore range:** up to 7 days, always the stored 1-minute values. Defaults to the newest day.
+- **Audit page:** recomputes the snapshot's integrity on every load (each file's SHA-256 and row count against `manifest.json`, the audit hash chain, the newest event against the manifest).
+- **Overview:** availability with a 95% line, and % of daytime minutes flagged with a 10% line, matching the asset checks.
+- **Availability counts values, not rows:** NOAA sent all 1440 rows on all 90 days, but 25 days have missing values inside those rows (NOAA's missing-value code; 938 GHI, 720 DNI, 8 DHI minutes). The dashboard counts sensor values (1440 × 3 per day) that arrived and aren't missing. The pipeline's `availability` check still counts rows received.
+
+Defaults chosen while building step 6:
+
+- **Layout:** `dashboard/app.py` (navigation and the sidebar time zone picker), `dashboard/views/` (one file per page; not `pages/`, which Streamlit would turn into its own navigation), `dashboard/queries.py` (all SQL, no Streamlit), `dashboard/charts.py` (plotly figures).
+- **Time zones offered:** America/Denver (default), UTC, and the other US zones. Explore and lineage dates are picked as local calendar days.
+- **CSV export:** one row per minute, local time first, then `ts_utc` (ISO, `Z`), values, then per sensor the final status, the automatic rules that fired and the overrides that apply, NOAA flags, and lineage (source hash, line, URL, run, code version).
+- **Colors:** GHI, DNI and DHI use categorical slots 1–3 (checked for color-blind separation). QC results use reserved status colors with their own marker shape and legend label: suspect (amber triangle), bad (red ×), flag accepted by an override (green open circle). Light theme pinned in `.streamlit/config.toml`.
+- **Tests:** `tests/test_dashboard.py` builds a 2-day snapshot from the fixtures (Aug 1 with `OVR-0001`, the Mar 4 partial day) for the queries and tamper tests, and loads every page with Streamlit's `AppTest` on the committed snapshot.

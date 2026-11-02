@@ -10,6 +10,8 @@ dependencies = [
     "dagster>=1.13.28",
     "duckdb>=2.0.0",
     "pandas>=3.1.0",
+    "plotly>=7.1.0",
+    "streamlit>=1.66.1",
 ]
 
 [build-system]
@@ -32,4 +34,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["dashboard"]
 addopts = "-ra"
+# DuckDB's .df() triggers this inside its own code when pyarrow is installed (via streamlit).
+filterwarnings = ["ignore:The inplace keyword in DataFrame.drop:pandas.errors.Pandas4Warning"]

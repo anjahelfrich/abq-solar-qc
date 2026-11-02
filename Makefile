@@ -1,4 +1,4 @@
-.PHONY: setup test lint format dagster backfill snapshot
+.PHONY: setup test lint format dagster backfill snapshot app
 
 export DAGSTER_HOME := $(CURDIR)/.dagster
 
@@ -28,3 +28,7 @@ backfill:
 
 snapshot:
 	uv run dagster asset materialize -m abq_qc.definitions --select snapshot
+
+# Reads the committed snapshot/ only. Run `make snapshot` first to show new data.
+app:
+	uv run streamlit run dashboard/app.py
