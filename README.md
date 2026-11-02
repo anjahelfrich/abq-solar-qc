@@ -2,7 +2,7 @@
 
 A data pipeline that checks the quality of 1-minute solar irradiance data from NOAA's SOLRAD station in Albuquerque, and records where every value came from. Lab staff review the results in a read-only dashboard.
 
-**Live dashboard:** _link added after deploy_
+**Live dashboard:** https://abq-solar-qc.streamlit.app/
 
 ![Dashboard Explore page for Aug 17, 2026, the day with the most missing values: 1-minute GHI, DNI and DHI with QC flags marked](docs/images/explore_aug17.png)
 
